@@ -99,10 +99,20 @@ struct Data<auto TotalLength, auto Compression, auto IsSubPacket> {
     } else {
         u16 sequence;
     }
+    
+    // https://github.com/psemu/soe-network/blob/9db135bb0f10b6d0a5e1a7e2e2dee063231f9fbe/lib/soeprotocol.js#L146
+    padding[2];
+    
     if (Compression && !IsSubPacket) {
         u8 data[TotalLength - 2];
     } else {
         u8 data[TotalLength - 3];
+    }
+    
+    if (IsSubPacket) {
+        u16 crc = 0;
+    } else {
+        u16 crc;
     }
 };
 
@@ -121,10 +131,14 @@ struct DataFragment<auto TotalLength, auto Compression, auto IsSubPacket> {
 };
 
 struct OutOfOrder<auto Compression, auto IsSubPacket> {
-    if (Compression) {
+    if (Compression && !IsSubPacket) {
         padding[1];
     }
     u16 sequence;
+    
+    if (!IsSubPacket) {
+        u16 crc;
+    }
 };
 
 struct Ack<auto Compression, auto IsSubPacket> {
@@ -132,6 +146,10 @@ struct Ack<auto Compression, auto IsSubPacket> {
         padding[1];
     }
     u16 sequence;
+    
+    if (!IsSubPacket) {
+        u16 crc;
+    }
 };
 
 // Special packets that go after everything else
@@ -142,29 +160,14 @@ struct MultiPacket<auto TotalLength, auto Compression, auto IsSubPacket> {
         padding[1];
     }
     
-    MultiPacketSubPacket subpackets[while($ < TotalLength - 2)];
+    MultiPacketSubPacket subpackets[while($ < TotalLength - 3)];
 };
 
 struct MultiPacketSubPacket {
     DataLength datalength;
     padding[datalength.numBytes];
 
-    // Inlining this
-    /*TransportPacketType type;
-    
-    match (type) {
-        (TransportPacketType::SESSION_REQUEST): SessionRequest<Compression, IsSubPacket> session_request;
-        (TransportPacketType::SESSION_REPLY): SessionReply<Compression, IsSubPacket> session_reply;
-        (TransportPacketType::MULTI_PACKET): MultiPacket<sizeof($), Compression, IsSubPacket> multi_packet;
-        (TransportPacketType::DISCONNECT): Disconnect<Compression, IsSubPacket> disconnect;
-        (TransportPacketType::PING): Ping<Compression, IsSubPacket> ping;
-        (TransportPacketType::NETSTATUS_REQUEST): NetStatusRequest<Compression, IsSubPacket> netstatus_request;
-        (TransportPacketType::NETSTATUS_REPLY): NetStatusReply<Compression, IsSubPacket> netstatus_reply;
-        (TransportPacketType::DATA): Data<sizeof($), Compression, IsSubPacket> data;
-        (TransportPacketType::DATA_FRAGMENT): DataFragment<sizeof($), Compression, IsSubPacket> data_fragment;
-        (TransportPacketType::OUT_OF_ORDER): OutOfOrder<Compression, IsSubPacket> out_of_order;
-        (TransportPacketType::ACK): Ack<Compression, IsSubpacket> ack;
-    }*/
+    MultiPacketSubPacket sub_packet;
 };
 
 struct TransportPacket<auto Compression, auto IsSubPacket> {
