@@ -16,11 +16,11 @@ enum TransportPacketType : u16 {
   DATA_FRAGMENT = 0x0d,
   OUT_OF_ORDER = 0x11,
   ACK = 0x15,
+  MULTI_MESSAGE = 0x19,
   FATAL_ERROR = 0x1d,
   FATAL_ERROR_REPLY = 0x1e
 };
 
-using TransportPacket;
 
 fn readDataLength(u32 offset, ref u32 numBytes) {
     u8 dataLength = std::mem::read_unsigned(offset, 1, std::mem::Endian::Big);
@@ -60,14 +60,14 @@ struct DataLength {
     }
 };
 
-struct SessionRequest {
+struct SessionRequest<auto Compression, auto IsSubPacket> {
     u32 crc_length;
     u32 session_id;
     u32 udp_length;
     char protocol[];
 };
 
-struct SessionReply {
+struct SessionReply<auto Compression, auto IsSubPacket> {
     u32 session_id;
     u32 crc_seed;
     u8 crc_length;
@@ -75,84 +75,115 @@ struct SessionReply {
     u32 udp_length;
 };
 
-struct MultiPacketSubPacket<auto TotalLength> {
-    DataLength datalength;
-    
-    padding[datalength.numBytes];
-    
-    TransportPacket packet;
-    
+struct Disconnect<auto Compression, auto IsSubPacket> {
 };
 
-struct MultiPacket<auto TotalLength, auto Compression> {
-    if (Compression) {
+struct Ping<auto Compression, auto IsSubPacket> {
+
+};
+
+struct NetStatusRequest<auto Compression, auto IsSubPacket> {
+};
+
+struct NetStatusReply<auto Compression, auto IsSubPacket> {
+};
+
+struct Data<auto TotalLength, auto Compression, auto IsSubPacket> {
+    if (Compression && !IsSubPacket) {
         padding[1];
     }
     
-    MultiPacketSubPacket<TotalLength> subpackets[while($ < TotalLength - 2)];
-};
-
-struct Disconnect {
-};
-
-struct Ping {
-
-};
-
-struct NetStatusRequest {
-};
-
-struct NetStatusReply {
-};
-
-struct Data<auto TotalLength, auto Compression> {
-    if (Compression) {
-        padding[1];
+    if (IsSubPacket) {
+        u16 sequence = 0;
+        padding[sizeof(u16)];
+    } else {
+        u16 sequence;
     }
-    u16 sequence;
-    u8 data[TotalLength - 2];
+    if (Compression && !IsSubPacket) {
+        u8 data[TotalLength - 2];
+    } else {
+        u8 data[TotalLength - 3];
+    }
 };
 
-struct DataFragment<auto TotalLength, auto Compression> {
+struct DataFragment<auto TotalLength, auto Compression, auto IsSubPacket> {
     if (Compression) {
         padding[1];
     }
     u16 sequence;
-    u16 crc;
+    if (IsSubPacket) {
+        u16 crc = 0;
+        padding[sizeof(u16)];
+    } else {
+        u16 crc;
+    }
     u8 data[TotalLength - $];
 };
 
-struct OutOfOrder<auto Compression> {
+struct OutOfOrder<auto Compression, auto IsSubPacket> {
     if (Compression) {
         padding[1];
     }
     u16 sequence;
 };
 
-struct Ack<auto Compression> {
+struct Ack<auto Compression, auto IsSubPacket> {
     if (Compression) {
         padding[1];
     }
     u16 sequence;
 };
 
+// Special packets that go after everything else
 
-struct TransportPacket {
+using MultiPacketSubPacket;
+struct MultiPacket<auto TotalLength, auto Compression, auto IsSubPacket> {
+    if (Compression) {
+        padding[1];
+    }
+    
+    MultiPacketSubPacket subpackets[while($ < TotalLength - 2)];
+};
+
+struct MultiPacketSubPacket {
+    DataLength datalength;
+    padding[datalength.numBytes];
+
+    // Inlining this
+    /*TransportPacketType type;
+    
+    match (type) {
+        (TransportPacketType::SESSION_REQUEST): SessionRequest<Compression, IsSubPacket> session_request;
+        (TransportPacketType::SESSION_REPLY): SessionReply<Compression, IsSubPacket> session_reply;
+        (TransportPacketType::MULTI_PACKET): MultiPacket<sizeof($), Compression, IsSubPacket> multi_packet;
+        (TransportPacketType::DISCONNECT): Disconnect<Compression, IsSubPacket> disconnect;
+        (TransportPacketType::PING): Ping<Compression, IsSubPacket> ping;
+        (TransportPacketType::NETSTATUS_REQUEST): NetStatusRequest<Compression, IsSubPacket> netstatus_request;
+        (TransportPacketType::NETSTATUS_REPLY): NetStatusReply<Compression, IsSubPacket> netstatus_reply;
+        (TransportPacketType::DATA): Data<sizeof($), Compression, IsSubPacket> data;
+        (TransportPacketType::DATA_FRAGMENT): DataFragment<sizeof($), Compression, IsSubPacket> data_fragment;
+        (TransportPacketType::OUT_OF_ORDER): OutOfOrder<Compression, IsSubPacket> out_of_order;
+        (TransportPacketType::ACK): Ack<Compression, IsSubpacket> ack;
+    }*/
+};
+
+struct TransportPacket<auto Compression, auto IsSubPacket> {
     TransportPacketType type;
     
     match (type) {
-        (TransportPacketType::SESSION_REQUEST): SessionRequest session_request;
-        (TransportPacketType::SESSION_REPLY): SessionReply session_reply;
-        (TransportPacketType::MULTI_PACKET): MultiPacket<sizeof($), true> multi_packet;
-        (TransportPacketType::DISCONNECT): Disconnect disconnect;
-        (TransportPacketType::PING): Ping ping;
-        (TransportPacketType::NETSTATUS_REQUEST): NetStatusRequest netstatus_request;
-        (TransportPacketType::NETSTATUS_REPLY): NetStatusReply netstatus_reply;
-        (TransportPacketType::DATA): Data<sizeof($), true> data;
-        (TransportPacketType::DATA_FRAGMENT): DataFragment<sizeof($), true> data_fragment;
-        (TransportPacketType::OUT_OF_ORDER): OutOfOrder<true> out_of_order;
-        (TransportPacketType::ACK): Ack<true> ack;
+        (TransportPacketType::SESSION_REQUEST): SessionRequest<Compression, IsSubPacket> session_request;
+        (TransportPacketType::SESSION_REPLY): SessionReply<Compression, IsSubPacket> session_reply;
+        (TransportPacketType::MULTI_PACKET): MultiPacket<sizeof($), Compression, IsSubPacket> multi_packet;
+        (TransportPacketType::DISCONNECT): Disconnect<Compression, IsSubPacket> disconnect;
+        (TransportPacketType::PING): Ping<Compression, IsSubPacket> ping;
+        (TransportPacketType::NETSTATUS_REQUEST): NetStatusRequest<Compression, IsSubPacket> netstatus_request;
+        (TransportPacketType::NETSTATUS_REPLY): NetStatusReply<Compression, IsSubPacket> netstatus_reply;
+        (TransportPacketType::DATA): Data<sizeof($), Compression, IsSubPacket> data;
+        (TransportPacketType::DATA_FRAGMENT): DataFragment<sizeof($), Compression, IsSubPacket> data_fragment;
+        (TransportPacketType::OUT_OF_ORDER): OutOfOrder<Compression, IsSubPacket> out_of_order;
+        (TransportPacketType::ACK): Ack<Compression, IsSubpacket> ack;
     }
 };
 
-TransportPacket packet @ 0x0;
+bool compression = true;
+TransportPacket<true, false> packet @ 0x0;
